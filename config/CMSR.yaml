@@ -1,0 +1,39 @@
+# model config
+model_name: CMSR
+
+num_layers: 1
+num_heads: 4
+embed_dim: 64
+ff_dim: 256
+
+hidden_dropout: 0.5
+attn_dropout: 0.5
+layer_norm_eps: 1e-12
+activation: gelu
+initializer_range: 0.02
+
+# training and evaluation
+epochs: 200
+train_batch_size: 256
+eval_batch_size: 256
+
+learning_rate: 0.001
+learner: adam
+
+loss_type: WCE
+
+stopping_step: 50
+eval_step : 10
+eval_args:
+    split: {'LS': 'valid_and_test'}
+    group_by: user
+    order: TO
+    mode: uni99
+metrics: ['MRR', 'NDCG', 'Hit']
+topk: [5, 10, 20]
+valid_metric: MRR@10
+valid_metric_bigger: True
+
+# disable negative sampling
+neg_sampling: ~
+train_neg_sample_args: ~
