@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 
 from model.layers import EncoderLayer
@@ -74,3 +75,4 @@ class Encoder(nn.Module):
             all_encoder_layers.append(hidden_states)
 
         return all_encoder_layers if output_all_encoder_layer else all_encoder_layers[-1]
+

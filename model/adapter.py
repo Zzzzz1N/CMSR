@@ -11,6 +11,21 @@ class MLPAdapter(nn.Module):
         - adapter_dim (int): Dimension of the adapter (default: 256)
         - dropout (float): Dropout rate (default: 0.1)
     """
+    # def __init__(self, d_model=768, adapter_dim=256, dropout=0.1):
+    #     super().__init__()
+    #     self.d_model = d_model
+    #     self.adapter_dim = adapter_dim
+        
+    #     # MLP structure: Linear -> GELU -> Dropout -> Linear -> Dropout
+    #     self.adapter = nn.Sequential(
+    #         nn.Linear(d_model, adapter_dim),
+    #         nn.GELU(),
+    #         nn.Dropout(dropout),
+    #         nn.Linear(adapter_dim, d_model),
+    #         nn.Dropout(dropout)
+    #     )
+        
+    #     self.scale = nn.Parameter(torch.ones(1))
     def __init__(self, d_model=768, adapter_dim=256, dropout=0.1):
         super().__init__()
         self.d_model = d_model
@@ -18,11 +33,9 @@ class MLPAdapter(nn.Module):
         
         # MLP structure: Linear -> GELU -> Dropout -> Linear -> Dropout
         self.adapter = nn.Sequential(
-            nn.Linear(d_model, adapter_dim),
-            nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(adapter_dim, d_model),
-            nn.Dropout(dropout)
+            nn.Linear(d_model, d_model),
+            nn.ReLU()
         )
         
         self.scale = nn.Parameter(torch.ones(1))

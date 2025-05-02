@@ -1,13 +1,16 @@
 import torch
 import torch.nn as nn
+import torch.nn.init as init
 from torch.nn.parameter import Parameter
 from recbole.model.abstract_recommender import SequentialRecommender
 from recbole.model.loss import BPRLoss
 from recbole.model.init import xavier_normal_initialization
+from recbole.data.interaction import Interaction
 
 from model.encoder import Encoder
 from model.layers import LayerNorm
 from model.wce import calculate_item_popularity, calculate_weight, WCE
+from model.wbpr import WBPRLoss
 
 
 class CMSR(SequentialRecommender):
@@ -38,6 +41,7 @@ class CMSR(SequentialRecommender):
 
         # load weights
         if weight_dict is not None:
+            print("weight_dict is not None! Loading weights from the checkpoint...")
             self.w_q = self._load_weight('query', weight_dict, self.requires_grad)
             self.w_k = self._load_weight('key', weight_dict, self.requires_grad)
             self.w_v = self._load_weight('value', weight_dict, self.requires_grad)
@@ -70,6 +74,7 @@ class CMSR(SequentialRecommender):
         self.LayerNorm = LayerNorm(self.embed_dim, eps=self.layer_norm_eps)
         self.dropout = nn.Dropout(self.hidden_dropout)
 
+
         # define loss
         if self.loss_type == 'BPR':
             self.loss = BPRLoss()
@@ -77,6 +82,11 @@ class CMSR(SequentialRecommender):
             self.loss = nn.CrossEntropyLoss()
         elif self.loss_type == 'WCE':  # weighted cross-entropy
             self.loss = WCE
+            self.alpha = config['alpha']
+            self.beta = config['beta']
+            self.item_popularity_dict = calculate_item_popularity(self.item_num, self.item_id)
+        elif self.loss_type == 'WBPR':  # weighted BPR
+            self.loss = WBPRLoss()
             self.alpha = config['alpha']
             self.beta = config['beta']
             self.item_popularity_dict = calculate_item_popularity(self.item_num, self.item_id)
@@ -89,15 +99,21 @@ class CMSR(SequentialRecommender):
         # self.cmsr_encoder.apply(xavier_normal_initialization)
         self.apply(self._init_weights)
         self.cmsr_encoder.apply(self._init_weights)
+
+        for name, param in self.cmsr_encoder.named_parameters():
+            print(f"{name}: requires_grad={param.requires_grad}")
     
     def _init_weights(self, module):
         """ Initialize the weights """
         if isinstance(module, (nn.Linear, nn.Embedding)):
-            # Slightly different from the TF version which uses truncated_normal for initialization
-            # cf https://github.com/pytorch/pytorch/pull/5617
-            if module.weight.requires_grad:
-                module.weight.data.normal_(
-                    mean=0.0, std=self.initializer_range)
+            if hasattr(module, 'weight') and module.weight.requires_grad:
+                # 跳过已经加载的权重
+                if getattr(self, "skip_pretrained_weights", False):
+                    if (module.weight.data.shape == self.w_q.shape and torch.allclose(module.weight.data, self.w_q)) or \
+                    (module.weight.data.shape == self.w_k.shape and torch.allclose(module.weight.data, self.w_k)) or \
+                    (module.weight.data.shape == self.w_v.shape and torch.allclose(module.weight.data, self.w_v)):
+                        return
+                module.weight.data.normal_(mean=0.0, std=self.initializer_range)
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
@@ -164,20 +180,26 @@ class CMSR(SequentialRecommender):
        
         attn_mask = self._get_attention_mask(item_seq)
        
+        
         cmsr_output = self.cmsr_encoder(
             input_emb, attn_mask
         )  # Shape: [batch_size, seq_len, hidden_size]
+        # for name, param in self.cmsr_encoder.named_parameters():
+        #     print(f"{name}: requires_grad={param.requires_grad}")
 
         output = self._gather_indexes(cmsr_output[-1], item_seq_len - 1)
 
         return output  # Shape: [batch_size, hidden_size]
 
     def calculate_loss(self, interaction):
+        # print(interaction)
+
         item_seq = interaction[self.ITEM_SEQ]
         item_seq_len = interaction[self.ITEM_SEQ_LEN]
         pos_item = interaction[self.ITEM_ID]
 
         item_output = self.forward(item_seq, item_seq_len)  # [batch_size, hidden_size]
+        # print("Item output:", item_output)
 
         if self.loss_type == 'BPR':
             neg_item = interaction[self.NEG_ITEM_ID]
@@ -201,10 +223,24 @@ class CMSR(SequentialRecommender):
             # item_popularity = torch.clamp(item_popularity, min=0, max=500)
             weights = calculate_weight(item_popularity, self.alpha, self.beta)
             loss = self.loss(logits, pos_item, weights=weights)
+        elif self.loss_type == 'WBPR':
+            neg_item = interaction[self.NEG_ITEM_ID]
+            pos_item_embed = self.item_embedding(pos_item)
+            neg_item_embed = self.item_embedding(neg_item)
+            pos_item_score = torch.mul(item_output, pos_item_embed).sum(dim=1)
+            neg_item_score = torch.mul(item_output, neg_item_embed).sum(dim=1)
+            pos_item_popularity = torch.tensor([self.item_popularity_dict[item.item()] for item in pos_item],
+                                           dtype=torch.float32, device=pos_item.device)
+            pos_weights = calculate_weight(pos_item_popularity, self.alpha, self.beta)
+            neg_item_popularity = torch.tensor([self.item_popularity_dict[item.item()] for item in neg_item],
+                                           dtype=torch.float32, device=neg_item.device)
+            neg_weights = calculate_weight(neg_item_popularity, self.alpha, self.beta)
+            loss = self.loss(pos_item_score, neg_item_score, pos_weights, neg_weights)
 
         if torch.isnan(loss).any():
             raise ValueError("Training loss is nan")
         
+        # print("Loss:", loss.item())
         return loss
 
     def predict(self, interaction):
