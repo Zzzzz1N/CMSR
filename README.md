@@ -1,6 +1,6 @@
 # CMSR
 
-This is an implementation for the framework [CMT-SR](https://github.com/ChenMetanoia/CATSR-KDD/).
+This is an implementation for the framework [CAT-SR](https://github.com/ChenMetanoia/CATSR-KDD/).
 
 ## Overview
 
