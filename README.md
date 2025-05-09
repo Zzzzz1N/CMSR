@@ -81,7 +81,7 @@ sh scripts/finetune.sh
 
 - **Pretrain** (single encoder layer, without MLP adapter)
 
-```
+```python
 CMSR(
   (item_embedding): Embedding(31126, 768)
   (position_embedding): Embedding(50, 768)
