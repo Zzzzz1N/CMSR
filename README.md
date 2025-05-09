@@ -10,7 +10,7 @@ Our objective is to compare the reproduced results with those reported in the or
 
 ## Framework
 
-![framework](pic\framework.png)
+![framework](pic/framework.png)
 
 ## Requirements
 
